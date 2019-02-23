@@ -1,27 +1,29 @@
 import logging
 import io
-import urllib
-
-import voluptuous as vol
-
-from homeassistant.helpers import config_validation as cv
-from homeassistant.const import (ATTR_ENTITY_ID, SERVICE_TURN_ON)
-from homeassistant.components.light import (ATTR_RGB_COLOR)
-from homeassistant.components import light
-
-REQUIREMENTS = ['numpy==1.16', 'pillow']
-
-_LOGGER = logging.getLogger(__name__)
+import urllib.request
 
 DEFAULT_IMAGE_RESIZE = (100, 100)
-ATTR_URL = 'url'
-SERVICE_RECOGNIZE_COLOR_AND_SET_LIGHT = 'turn_light_to_recognized_color'
-DOMAIN = 'color_recognizer'
 
-RECOGNIZE_COLOR_SCHEMA = vol.Schema({
-    vol.Required(ATTR_URL): cv.url,
-    vol.Required(ATTR_ENTITY_ID): cv.entity_ids,
-}, extra=vol.ALLOW_EXTRA)
+if __name__ != "__main__":
+    import voluptuous as vol
+
+    from homeassistant.helpers import config_validation as cv
+    from homeassistant.const import (ATTR_ENTITY_ID, SERVICE_TURN_ON)
+    from homeassistant.components.light import (ATTR_RGB_COLOR)
+    from homeassistant.components import light
+
+    REQUIREMENTS = ['numpy==1.16', 'pillow', 'scipy']
+
+    _LOGGER = logging.getLogger(__name__)
+
+    ATTR_URL = 'url'
+    SERVICE_RECOGNIZE_COLOR_AND_SET_LIGHT = 'turn_light_to_recognized_color'
+    DOMAIN = 'color_recognizer'
+
+    RECOGNIZE_COLOR_SCHEMA = vol.Schema({
+        vol.Required(ATTR_URL): cv.url,
+        vol.Required(ATTR_ENTITY_ID): cv.entity_ids,
+    }, extra=vol.ALLOW_EXTRA)
 
 
 def setup(hass, config):
@@ -35,6 +37,9 @@ def setup(hass, config):
     hass.services.register(DOMAIN, SERVICE_RECOGNIZE_COLOR_AND_SET_LIGHT, turn_lights_to_recognized_color, schema=RECOGNIZE_COLOR_SCHEMA)
 
     return True
+
+def download_image(url):
+    return io.BytesIO(urllib.request.urlopen(url).read())
 
 
 """ Taken from: https://github.com/davidkrantz/Colorfy """
@@ -107,10 +112,11 @@ class SpotifyBackgroundColor:
 
         """
         import numpy as np
+        from scipy.cluster.vq import kmeans
 
         self.img = self.img.reshape((self.img.shape[0]*self.img.shape[1], 3))
 
-        centroids = k_means(self.img, k)
+        centroids = kmeans(self.img, k)[0]
 
         colorfulness = [self.colorfulness(color[0], color[1], color[2]) for color in centroids]
         max_colorful = np.max(colorfulness)
@@ -163,67 +169,13 @@ class ColorRecognizer:
         self.url = url
 
     def best_colors(self):
-        image = self.download_image()
+        image = download_image(self.url)
         return SpotifyBackgroundColor(image, image_processing_size=DEFAULT_IMAGE_RESIZE).best_color(k=4, color_tol=5)
 
-    def download_image(self):
-        return io.BytesIO(urllib.request.urlopen(self.url).read())
-
-def k_means(data, k=2, max_iter=100):
-    """Assigns data points into clusters using the k-means algorithm.
-
-    Parameters
-    ----------
-    data : ndarray
-        A 2D array containing data points to be clustered.
-    k : int, optional
-        Number of clusters (default = 2).
-    max_iter : int, optional
-        Number of maximum iterations
-
-    Returns
-    -------
-    labels : ndarray
-        A 1D array of labels for their respective input data points.
-    """
-
-    import numpy as np
-
-    # data_max/data_min : array containing column-wise maximum/minimum values
-    data_max = np.max(data, axis=0)
-    data_min = np.min(data, axis=0)
-
-    n_samples = data.shape[0]
-    n_features = data.shape[1]
-
-    # labels : array containing labels for data points, randomly initialized
-    labels = np.random.randint(low=0, high=k, size=n_samples)
-    # centroids : 2D containing centroids for the k-means algorithm
-    # randomly initialized s.t. data_min <= centroid < data_max
-    centroids = np.random.uniform(low=0., high=1., size=(k, n_features))
-    centroids = centroids * (data_max - data_min) + data_min
-
-    # k-means algorithm
-    for i in range(max_iter):
-        # distances : between datapoints and centroids
-        distances = np.array(
-            [np.linalg.norm(data - c, axis=1) for c in centroids])
-        # new_labels : computed by finding centroid with minimal distance
-        new_labels = np.argmin(distances, axis=0)
-
-        if (labels == new_labels).all():
-            # labels unchanged
-            labels = new_labels
-            # print('Labels unchanged ! Terminating k-means.')
-            break
-        else:
-            # labels changed
-            # difference : percentage of changed labels
-            difference = np.mean(labels != new_labels)
-            # print('%4f%% labels changed' % (difference * 100))
-            labels = new_labels
-            for c in range(k):
-                # computing centroids by taking the mean over associated data points
-                centroids[c] = np.mean(data[labels == c], axis=0)
-
-    return labels
+if __name__ == "__main__":
+    params = {'k': 5, 'color_tol': 5}
+    print(params)
+    image = download_image("https://f4.bcbits.com/img/a2074947048_10.jpg")
+    print(SpotifyBackgroundColor(image, image_processing_size=DEFAULT_IMAGE_RESIZE).best_color(**params))
+    image = download_image("https://upload.wikimedia.org/wikipedia/en/thumb/2/27/Ghost_of_a_rose.jpg/220px-Ghost_of_a_rose.jpg")
+    print(SpotifyBackgroundColor(image, image_processing_size=DEFAULT_IMAGE_RESIZE).best_color(**params))
