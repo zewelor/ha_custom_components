@@ -9,7 +9,7 @@ from homeassistant.const import (ATTR_ENTITY_ID, SERVICE_TURN_ON)
 from homeassistant.components.light import (ATTR_RGB_COLOR)
 from homeassistant.components import light
 
-REQUIREMENTS = ['numpy==1.15.4', 'pillow', 'scipy']
+REQUIREMENTS = ['numpy==1.16', 'pillow']
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -107,11 +107,10 @@ class SpotifyBackgroundColor:
 
         """
         import numpy as np
-        from scipy.cluster.vq import kmeans
 
         self.img = self.img.reshape((self.img.shape[0]*self.img.shape[1], 3))
 
-        centroids = kmeans(self.img, k)[0]
+        centroids = k_means(self.img, k)
 
         colorfulness = [self.colorfulness(color[0], color[1], color[2]) for color in centroids]
         max_colorful = np.max(colorfulness)
@@ -170,3 +169,61 @@ class ColorRecognizer:
     def download_image(self):
         return io.BytesIO(urllib.request.urlopen(self.url).read())
 
+def k_means(data, k=2, max_iter=100):
+    """Assigns data points into clusters using the k-means algorithm.
+
+    Parameters
+    ----------
+    data : ndarray
+        A 2D array containing data points to be clustered.
+    k : int, optional
+        Number of clusters (default = 2).
+    max_iter : int, optional
+        Number of maximum iterations
+
+    Returns
+    -------
+    labels : ndarray
+        A 1D array of labels for their respective input data points.
+    """
+
+    import numpy as np
+
+    # data_max/data_min : array containing column-wise maximum/minimum values
+    data_max = np.max(data, axis=0)
+    data_min = np.min(data, axis=0)
+
+    n_samples = data.shape[0]
+    n_features = data.shape[1]
+
+    # labels : array containing labels for data points, randomly initialized
+    labels = np.random.randint(low=0, high=k, size=n_samples)
+    # centroids : 2D containing centroids for the k-means algorithm
+    # randomly initialized s.t. data_min <= centroid < data_max
+    centroids = np.random.uniform(low=0., high=1., size=(k, n_features))
+    centroids = centroids * (data_max - data_min) + data_min
+
+    # k-means algorithm
+    for i in range(max_iter):
+        # distances : between datapoints and centroids
+        distances = np.array(
+            [np.linalg.norm(data - c, axis=1) for c in centroids])
+        # new_labels : computed by finding centroid with minimal distance
+        new_labels = np.argmin(distances, axis=0)
+
+        if (labels == new_labels).all():
+            # labels unchanged
+            labels = new_labels
+            # print('Labels unchanged ! Terminating k-means.')
+            break
+        else:
+            # labels changed
+            # difference : percentage of changed labels
+            difference = np.mean(labels != new_labels)
+            # print('%4f%% labels changed' % (difference * 100))
+            labels = new_labels
+            for c in range(k):
+                # computing centroids by taking the mean over associated data points
+                centroids[c] = np.mean(data[labels == c], axis=0)
+
+    return labels
